@@ -1,76 +1,70 @@
-import requests
+import csv
+import json
+import urllib.request
 from bs4 import BeautifulSoup
-import pandas as pd
-import os
 
-# Function to extract product details from a page
-def extract_product_details(soup):
-    products = []
-    product_items = soup.find_all('div', class_='grid__item')  # Adjust this according to the actual structure
-    total_products = len(product_items)
-    for index, product in enumerate(product_items):
-        try:
-            title = product.find('div', class_='grid-product__title').text.strip() if product.find('div', class_='grid-product__title') else 'N/A'
-            price = product.find('span', class_='grid-product__price').text.strip() if product.find('span', class_='grid-product__price') else 'N/A'
-            category = 'N/A'  # Update this if category info is available on the product listing page
-            image = product.find('img', class_='grid__image')['src'] if product.find('img', class_='grid__image') else 'N/A'
-            link = 'https://cartbeaststore.com' + product.find('a', href=True)['href'] if product.find('a', href=True) else 'N/A'
-            
-            # Fetch the product page for additional details
-            product_page = requests.get(link)
-            product_soup = BeautifulSoup(product_page.content, 'html.parser')
-            
-            short_description = product_soup.find('div', class_='product-single__description').text.strip() if product_soup.find('div', class_='product-single__description') else 'N/A'
-            description = product_soup.find('div', class_='product-single__description').text.strip() if product_soup.find('div', class_='product-single__description') else 'N/A'
-            
-            products.append({
-                'Title': title,
-                'Price': price,
-                'Category': category,
-                'Image Link': image,
-                'Link': link,
-                'Short Description': short_description,
-                'Description': description
-            })
+# Hardcoded URL for the Shopify store
+base_url = 'https://cartbeaststore.com'
+collection_url = base_url + '/collections/all/products.json'
+with_variants = True  # Set this to False if you don't want to scrape variants
 
-            # Print progress
-            print(f"Processed {index + 1}/{total_products} products.")
-        
-        except Exception as e:
-            print(f"Failed to process product {index + 1}/{total_products}. Error: {e}")
-    
+def get_page(url, page):
+    full_url = f'{url}?page={page}'
+    data = urllib.request.urlopen(full_url).read()
+    products = json.loads(data)['products']
     return products
 
-# Function to get all product details by traversing pagination
-def get_all_products(url):
-    products = []
+def get_tags_from_product(product_url):
+    r = urllib.request.urlopen(product_url).read()
+    soup = BeautifulSoup(r, "html.parser")
+
+    title = soup.title.string
+    description = ''
+    meta = soup.find_all('meta')
+    for tag in meta:
+        if 'name' in tag.attrs.keys() and tag.attrs['name'].strip().lower() == 'description':
+            description = tag.attrs['content']
+    return [title, description]
+
+def get_image_url(product):
+    images = product['images']
+    if images:
+        return images[0]['src']
+    return ''
+
+# Main scraping and writing function
+with open('sports_and_fitness_products.csv', 'w', newline='', encoding='utf-8') as f:
     page = 1
-    while url:
-        response = requests.get(url)
-        soup = BeautifulSoup(response.content, 'html.parser')
-        products.extend(extract_product_details(soup))
-        
-        next_page = soup.find('link', rel='next')
-        url = 'https://cartbeaststore.com' + next_page['href'] if next_page else None
+    print("[+] Starting script")
 
-        print(f"Completed page {page}. Moving to next page...")
+    writer = csv.writer(f)
+    if with_variants:
+        writer.writerow(['Name', 'Variant Name', 'Price', 'URL', 'Image URL', 'Meta Title', 'Meta Description', 'Product Description'])
+    else:
+        writer.writerow(['Name', 'URL', 'Image URL', 'Meta Title', 'Meta Description', 'Product Description'])
+
+    print("[+] Checking products page")
+    products = get_page(collection_url, page)
+    while products:
+        for product in products:
+            name = product['title']
+            product_url = base_url + '/products/' + product['handle']
+            image_url = get_image_url(product)
+            body_description = BeautifulSoup(product['body_html'], "html.parser").get_text()
+
+            print(" ├ Scraping: " + product_url)
+            title, description = get_tags_from_product(product_url)
+
+            if with_variants:
+                for variant in product['variants']:
+                    variant_name = variant['title']
+                    price = variant['price']
+                    row = [name, variant_name, price, product_url, image_url, title, description, body_description]
+                    writer.writerow(row)
+            else:
+                row = [name, product_url, image_url, title, description, body_description]
+                writer.writerow(row)
         page += 1
+        products = get_page(collection_url, page)
 
-    return products
-
-# Replace with the actual Shopify website URL
-url = "https://cartbeaststore.com/collections/all"
-
-# Fetch all products from the website
-all_products = get_all_products(url)
-
-# Convert the products list to a DataFrame
-df = pd.DataFrame(all_products)
-
-# Define the path to save the file
-output_file = os.path.join(os.getcwd(), 'shopify_products.csv')
-
-# Save the DataFrame to a CSV file
-df.to_csv(output_file, index=False)
-
-print(f"Product data has been saved to {output_file}")
+print("[+] Script completed")

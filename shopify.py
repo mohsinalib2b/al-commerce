@@ -4,7 +4,7 @@ import urllib.request
 from bs4 import BeautifulSoup
 
 # Hardcoded URL for the Shopify store
-base_url = 'https://cartbeaststore.com'
+base_url = 'https://domain.com'
 collection_url = base_url + '/collections/all/products.json'
 with_variants = True  # Set this to False if you don't want to scrape variants
 
